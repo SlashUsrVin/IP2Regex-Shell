@@ -58,6 +58,20 @@ round_down_100 () {
     echo "$rrd"
 }
 
+#Remove redundancy. i.e [0-0] gets updated to just 0, [1-1] gets updated to just 1, etc.
+regx_cleanup () {
+    in="$1"
+    i="0"
+    out="$in"
+
+    while [ "$i" -lt 10 ]; do
+        out=$(echo "$out" | sed "s/\[${i}\-${i}\]/${i}/g")
+        i=$(( i + 1 ))
+    done
+
+    echo "$out"
+}
+
 #Converts IP range to Regular Expression
 #SAMPLE INPUT: 192.168.1.0 192.168.1.255
 #SAMPLE OUTPUT: (192)\.(168)\.(1)\.([0-9]|[2-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])
@@ -68,6 +82,8 @@ regx_num_rng () {
 
     len_S="${#rng_S}"
     len_E="${#rng_E}"
+
+    rng_diff=$(( rng_E - rng_S ))
 
     #round down to the nearest 10th
     rd_10_S=$(round_down_10 "$rng_S")
@@ -81,29 +97,30 @@ regx_num_rng () {
 
     #Identify parts to build
     #Check regex_table.txt
-    if [ "$rd_10_diff" -eq 0 ]; then
-        p9="0"
-    else
+    if [ "$rng_diff" -ge 20 ] || [ "$rd_10_diff" -gt 0 ]; then
         p9="1"
+    else
+        p9="0"
     fi
 
-    if { [ "$rng_S" -le 99 ] && [ "$rng_E" -gt 99 ]; }; then
+    if [ "$rng_S" -le 99 ] && [ "$rng_E" -gt 99 ] && [ "$rd_10_S" -ne 90 ]; then
         p99="1"
     else
         p99="0"
     fi 
 
-    if { [ "$rng_S" -le 199 ] && [ "$rng_E" -gt 199 ]; }; then
+    if [ "$rng_S" -le 199 ] && [ "$rng_E" -gt 199 ] && [ "$rd_10_S" -ne 190 ]; then
         p199="1"
     else
         p199="0"
     fi
 
-    if  { [ "$rd_10_diff" -lt 20 ]  && [ "$len_E" -lt 3 ]; } || \
-        { [ "$rd_100_diff" -lt 10 ]  && [ "$len_E" -gt 2 ]; }; then
-        pr10th="0"
-    else
+    pr10th_val=$(( rd_10_E - 10 ))
+
+    if  [ "$pr10th_val" -ne 90 ] && [ "$pr10th_val" -ne 190 ] && [ "$pr10th_val" -ne "$rd_10_S" ] && [ "$rd_10_diff" -gt 0 ]; then
         pr10th="1"
+    else
+        pr10th="0"
     fi
 
     #Find constant for PART9 literal
@@ -174,7 +191,7 @@ regx_num_rng () {
     if [ "$p99" -eq 1 ]; then
         if [ -z "$cons_S" ]; then
             #Start at the next 10s. If range starts at < 20, P99 range start is 20: 1[0-9]|[2-9][0-9]
-            p99_10s_rng_S="2" 
+            p99_10s_rng_S="1" 
         else
             #Start at the next 10s. If range starts at 21, P99 range start is 30: 2[1-9]|[3-9][0-9]
             p99_10s_rng_S=$(( cons_S + 1 ))  
@@ -190,7 +207,7 @@ regx_num_rng () {
         #Therefore, PART9 is 14[2-9] and PART199 is 150-199
         #14[2-9]|1[5-9][0-9]
 
-        cons_199_S=$(echo "$second10s" | cut -c1) #This is always 1
+        cons_199_S="1" 
         
         if [ "$p99" -eq 1 ]; then
             p199_10s_rng_S="0" 
@@ -208,7 +225,7 @@ regx_num_rng () {
         #Therefore, PRIOR-10TH is 210-219 and FIN9 is 220-222
         #21[0-9]|22[0-2]
 
-        if [ "$p99" -eq 1 ] || [ "$p199" -eq 1 ]; then
+        if [ "$p99" -eq 1 ] || [ "$p199" -eq 1 ] || [ "$rd_10_S" -eq 90 ]; then
             pr10th_10s_S="0"  
         else
             second10s=$(( ${cons_S:-0} + 1 ))
@@ -242,6 +259,8 @@ regx_num_rng () {
         ret_rgx="${ret_rgx}|"
     fi
     ret_rgx="${ret_rgx}${cons_E}[${f9_1s_rng_S}-${f9_1s_rng_E}]"
+
+    ret_rgx=$(regx_cleanup "$ret_rgx")
 
     echo "$ret_rgx"
 }
